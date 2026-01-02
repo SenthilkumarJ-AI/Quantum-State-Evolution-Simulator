@@ -1,0 +1,205 @@
+!pip install qiskit ipywidgets matplotlib pylatexenc --quiet
+
+import numpy as np
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display, Markdown, clear_output
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import Statevector, DensityMatrix, partial_trace
+from qiskit.visualization import plot_bloch_multivector
+
+# ------------------------------------------------------------
+# Single-Qubit Gates
+# ------------------------------------------------------------
+single_qubit_gates = {
+    "I": np.eye(2),
+    "X": np.array([[0, 1], [1, 0]]),
+    "Y": np.array([[0, -1j], [1j, 0]]),
+    "Z": np.array([[1, 0], [0, -1]]),
+    "H": (1/np.sqrt(2)) * np.array([[1, 1], [1, -1]]),
+    "S": np.array([[1, 0], [0, 1j]]),
+    "T": np.array([[1, 0], [0, np.exp(1j*np.pi/4)]])
+}
+
+# ------------------------------------------------------------
+# Initial States
+# ------------------------------------------------------------
+initial_states_1q = {
+    "|0⟩": np.array([1, 0]),
+    "|1⟩": np.array([0, 1]),
+    "|+⟩": (1/np.sqrt(2)) * np.array([1, 1]),
+    "|-⟩": (1/np.sqrt(2)) * np.array([1, -1])
+}
+
+# ------------------------------------------------------------
+# Initial Two-Qubit States (Bell States) and their circuits
+# ------------------------------------------------------------
+two_qubit_initial_state_circuits = {
+    "|Φ+⟩ = (|00⟩ + |11⟩)/√2": lambda qc: (qc.h(0), qc.cx(0, 1)),
+    "|Φ-⟩ = (|00⟩ - |11⟩)/√2": lambda qc: (qc.h(0), qc.cx(0, 1), qc.z(0)),
+    "|Ψ+⟩ = (|01⟩ + |10⟩)/√2": lambda qc: (qc.x(1), qc.h(0), qc.cx(0, 1)),
+    "|Ψ-⟩ = (|01⟩ - |10⟩)/√2": lambda qc: (qc.x(1), qc.h(0), qc.cx(0, 1), qc.z(0)),
+}
+
+# ------------------------------------------------------------
+# UI Components
+# ------------------------------------------------------------
+title = Markdown(
+    "## ⚛️ Quantum State Evolution Simulator\n"
+    "**Includes Measurement & 2-Qubit Entanglement**"
+)
+
+mode_toggle = widgets.ToggleButtons(
+    options=["Single Qubit", "Two Qubits (Entanglement)"],
+    description="Mode:"
+)
+
+state_dropdown = widgets.Dropdown(
+    options=list(initial_states_1q.keys()),
+    description="Initial State:"
+)
+
+gate_selector = widgets.SelectMultiple(
+    options=list(single_qubit_gates.keys()),
+    description="Apply Gates:",
+    rows=6
+)
+
+two_qubit_state_dropdown = widgets.Dropdown(
+    options=list(two_qubit_initial_state_circuits.keys()),
+    description="Initial 2-Qubit State:",
+    layout={'display': 'none'} # Initially hidden
+)
+
+run_button = widgets.Button(
+    description="Run Simulation",
+    button_style="success",
+    icon="play"
+)
+
+output = widgets.Output()
+
+# ------------------------------------------------------------
+# Helper: Measurement Probabilities
+# ------------------------------------------------------------
+def measurement_probabilities(statevector):
+    probs = np.abs(statevector) ** 2
+    return probs
+
+# ------------------------------------------------------------
+# Core Logic
+# ------------------------------------------------------------
+def run_simulation(btn):
+    with output:
+        clear_output()
+
+        # =====================================================
+        # SINGLE QUBIT MODE
+        # =====================================================
+        if mode_toggle.value == "Single Qubit":
+
+            init_state_label = state_dropdown.value
+            gates_selected = gate_selector.value
+
+            if not gates_selected:
+                display(Markdown("⚠️ **Select at least one gate**"))
+                return
+
+            state = initial_states_1q[init_state_label]
+            qc = QuantumCircuit(1)
+
+            display(Markdown(f"### Initial State: {init_state_label}"))
+            display(Markdown("The Bloch sphere visualizes the state of a single qubit. The north pole represents |0⟩, the south pole represents |1⟩, and points on the surface represent superpositions."))
+            display(plot_bloch_multivector(state))
+
+            for gate in gates_selected:
+                state = single_qubit_gates[gate] @ state
+
+                getattr(qc, gate.lower(), lambda x: None)(0)
+
+                display(Markdown(f"#### After **{gate}** gate"))
+                display(plot_bloch_multivector(state))
+
+            probs = measurement_probabilities(state)
+
+            display(Markdown("### Final State Vector"))
+            print(state)
+
+            display(Markdown("### Measurement Probabilities"))
+            print({
+                "|0⟩": round(probs[0], 4),
+                "|1⟩": round(probs[1], 4)
+            })
+
+            display(Markdown("### Quantum Circuit"))
+            display(qc.draw(output="mpl"))
+            plt.show() # Ensure the matplotlib figure is displayed
+
+        # =====================================================
+        # TWO-QUBIT ENTANGLEMENT MODE
+        # =====================================================
+        else:
+            selected_bell_state_label = two_qubit_state_dropdown.value
+            qc = QuantumCircuit(2)
+            # Generate the circuit for the selected Bell state
+            bell_state_circuit_func = two_qubit_initial_state_circuits[selected_bell_state_label]
+            bell_state_circuit_func(qc)
+
+            state = Statevector.from_instruction(qc)
+            dm = DensityMatrix(state) # Convert to DensityMatrix for partial_trace
+
+            display(Markdown(f"### Two-Qubit Entangled State: {selected_bell_state_label}"))
+            display(Markdown("A Bell state is a maximally entangled quantum state of two qubits, forming the basis of quantum entanglement experiments."))
+
+            display(Markdown("### Quantum Circuit"))
+            display(qc.draw(output="mpl"))
+            plt.show() # Ensure the matplotlib figure is displayed
+
+            probs = state.probabilities_dict()
+
+            display(Markdown("### Measurement Probabilities"))
+            for k, v in probs.items():
+                print(f"|{k}⟩ : {round(v, 4)}")
+
+            display(Markdown("### Bloch Sphere (Qubit 0)"))
+            display(Markdown("For a two-qubit entangled state, the Bloch sphere can represent the state of an individual qubit by performing a partial trace over the other qubit. Here, we show the state of Qubit 0."))
+            display(plot_bloch_multivector(partial_trace(dm, [1])))
+
+            display(Markdown("### Bloch Sphere (Qubit 1)"))
+            display(Markdown("Similarly, we can view the state of Qubit 1 by tracing out Qubit 0."))
+            display(plot_bloch_multivector(partial_trace(dm, [0])))
+
+
+# ------------------------------------------------------------
+# Observer for Mode Toggle
+# ------------------------------------------------------------
+def on_mode_change(change):
+    if change['new'] == "Two Qubits (Entanglement)": # Corrected from change.new to change['new']
+        state_dropdown.layout.display = 'none'
+        gate_selector.layout.display = 'none'
+        two_qubit_state_dropdown.layout.display = 'flex'
+    else:
+        state_dropdown.layout.display = 'flex'
+        gate_selector.layout.display = 'flex'
+        two_qubit_state_dropdown.layout.display = 'none'
+
+mode_toggle.observe(on_mode_change, names='value')
+
+# ------------------------------------------------------------
+# Bind Button
+# ------------------------------------------------------------
+run_button.on_click(run_simulation)
+
+# ------------------------------------------------------------
+# Display UI
+# ------------------------------------------------------------
+display(title)
+display(mode_toggle)
+display(state_dropdown)
+display(gate_selector)
+display(two_qubit_state_dropdown)
+display(run_button)
+display(output)
+
+# Set initial visibility based on default mode_toggle value
+on_mode_change({'new': mode_toggle.value})
